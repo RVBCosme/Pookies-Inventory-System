@@ -71,7 +71,8 @@ interface InventoryDashboardProps {
 }
 
 export function InventoryDashboard({ posSyncSignal }: InventoryDashboardProps = {}) {
-  const [inventory, setInventory]         = useState<InventoryItem[]>(initialInventory);
+  const [inventory, setInventory]         = useState<InventoryItem[]>([]);
+  const [isLoading, setIsLoading]         = useState(true);
   const [showAddModal, setShowAddModal]   = useState(false);
   const [showStockIn, setShowStockIn]     = useState(false);
   const [searchQuery, setSearchQuery]     = useState('');
@@ -84,6 +85,7 @@ export function InventoryDashboard({ posSyncSignal }: InventoryDashboardProps = 
   // ── Fetch inventory from backend on mount ───────────────────────────────
   useEffect(() => {
     const fetchInventory = async () => {
+      setIsLoading(true);
       try {
         const response = await getStock();
         
@@ -103,8 +105,10 @@ export function InventoryDashboard({ posSyncSignal }: InventoryDashboardProps = 
         setInventory(items);
       } catch (err) {
         console.error('[fetchInventory]', err);
-        // Fall back to initialInventory if fetch fails
-        console.warn('Failed to fetch inventory from backend, using local data');
+        // If fetch fails, still stop loading (show empty state rather than test data)
+        console.warn('Failed to fetch inventory from backend');
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -347,7 +351,7 @@ export function InventoryDashboard({ posSyncSignal }: InventoryDashboardProps = 
       <main className="max-w-7xl mx-auto px-6 py-6">
 
         {/* ── Stat cards — Inventory tab only ─────────────────────────── */}
-        {activeTab === 'inventory' && (
+        {activeTab === 'inventory' && !isLoading && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatsCard
               icon={<Package className="w-5 h-5" />}
@@ -394,43 +398,75 @@ export function InventoryDashboard({ posSyncSignal }: InventoryDashboardProps = 
             </div>
 
             {/* Production Readiness — "Can I Bake?" panel */}
-            <CanIBakePanel inventory={inventory} />
+            {!isLoading && <CanIBakePanel inventory={inventory} />}
 
-            {/* Search + filter controls */}
-            <div className="bg-white rounded-2xl border border-[#F0DCC0] p-4 mb-4 shadow-sm">
-              <div className="flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
-                <div className="flex-1 w-full relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C5B5A8]" />
-                  <input
-                    type="text"
-                    placeholder="Search ingredients or suppliers..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 border border-[#F0DCC0] rounded-xl bg-[#FEF9F2] focus:outline-none focus:ring-2 focus:ring-[#4A7C59]/40 text-sm text-[#3C2A1E]"
-                    style={{ fontFamily: "'DM Sans', sans-serif" }}
-                  />
+            {isLoading ? (
+              // Loading state
+              <div className="bg-white rounded-2xl border border-[#F0DCC0] p-6 shadow-sm">
+                <div className="flex flex-col items-center justify-center py-12 gap-4">
+                  <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[#E8F2EB] animate-pulse">
+                    <Package className="w-5 h-5 text-[#4A7C59]" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-[#7A6558]" style={{ fontWeight: 500 }}>
+                      Loading inventory from database...
+                    </p>
+                    <p className="text-xs text-[#C5B5A8] mt-1">This may take a moment on first load</p>
+                  </div>
                 </div>
-                <select
-                  value={filterCategory}
-                  onChange={e => setFilterCategory(e.target.value)}
-                  className="px-4 py-2 border border-[#F0DCC0] rounded-xl bg-[#FEF9F2] focus:outline-none focus:ring-2 focus:ring-[#4A7C59]/40 text-sm text-[#3C2A1E]"
-                  style={{ fontFamily: "'DM Sans', sans-serif" }}
-                >
-                  <option value="all">All Categories</option>
-                  {(Object.keys(CATEGORY_LABELS) as Category[]).map(cat => (
-                    <option key={cat} value={cat}>
-                      {CATEGORY_LABELS[cat]}
-                    </option>
-                  ))}
-                </select>
               </div>
-            </div>
+            ) : inventory.length === 0 ? (
+              // No data state
+              <div className="bg-white rounded-2xl border border-[#F0DCC0] p-6 shadow-sm">
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Package className="w-8 h-8 text-[#D0C4BE]" />
+                  <div className="text-center">
+                    <p className="text-sm text-[#7A6558]" style={{ fontWeight: 500 }}>
+                      No ingredients in database
+                    </p>
+                    <p className="text-xs text-[#C5B5A8] mt-1">Add ingredients to get started</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Search + filter controls */}
+                <div className="bg-white rounded-2xl border border-[#F0DCC0] p-4 mb-4 shadow-sm">
+                  <div className="flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
+                    <div className="flex-1 w-full relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C5B5A8]" />
+                      <input
+                        type="text"
+                        placeholder="Search ingredients or suppliers..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 border border-[#F0DCC0] rounded-xl bg-[#FEF9F2] focus:outline-none focus:ring-2 focus:ring-[#4A7C59]/40 text-sm text-[#3C2A1E]"
+                        style={{ fontFamily: "'DM Sans', sans-serif" }}
+                      />
+                    </div>
+                    <select
+                      value={filterCategory}
+                      onChange={e => setFilterCategory(e.target.value)}
+                      className="px-4 py-2 border border-[#F0DCC0] rounded-xl bg-[#FEF9F2] focus:outline-none focus:ring-2 focus:ring-[#4A7C59]/40 text-sm text-[#3C2A1E]"
+                      style={{ fontFamily: "'DM Sans', sans-serif" }}
+                    >
+                      <option value="all">All Categories</option>
+                      {(Object.keys(CATEGORY_LABELS) as Category[]).map(cat => (
+                        <option key={cat} value={cat}>
+                          {CATEGORY_LABELS[cat]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-            <InventoryList
-              items={filteredInventory}
-              onUpdate={updateItem}
-              onDelete={deleteItem}
-            />
+                <InventoryList
+                  items={filteredInventory}
+                  onUpdate={updateItem}
+                  onDelete={deleteItem}
+                />
+              </>
+            )}
           </>
         )}
 

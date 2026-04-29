@@ -10,8 +10,10 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Loader,
 } from 'lucide-react';
 import { InventoryItem, CATEGORY_LABELS, Category } from '../data/inventory';
+import { uploadReceipt, restockIngredient } from '../services/inventoryApi';
 
 interface StockInModalProps {
   inventory: InventoryItem[];
@@ -47,6 +49,9 @@ export function StockInModal({ inventory, onStockIn, onClose }: StockInModalProp
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [successTime, setSuccessTime] = useState<Date | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadedReceiptName, setUploadedReceiptName] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,15 +102,73 @@ export function StockInModal({ inventory, onStockIn, onClose }: StockInModalProp
     ([, v]) => v !== '' && parseFloat(v) > 0
   );
 
-  const handleConfirm = () => {
-    const updates: Record<string, number> = {};
-    for (const [id, val] of updatedItems) {
-      const n = parseFloat(val);
-      if (!isNaN(n) && n > 0) updates[id] = n;
+  const handleConfirm = async () => {
+    setUploadError(null);
+    setIsUploading(true);
+
+    try {
+      let receiptUploadId: number | undefined;
+
+      // Step 1: Upload receipt image if selected
+      if (receiptFile) {
+        try {
+          const receiptResponse = await uploadReceipt(receiptFile);
+          receiptUploadId = receiptResponse.id;
+          setUploadedReceiptName(receiptResponse.imageName);
+        } catch (uploadErr) {
+          const errorMsg = (uploadErr as Error).message || 'Failed to upload receipt';
+          setUploadError(errorMsg);
+          setIsUploading(false);
+          return;
+        }
+      }
+
+      // Step 2: Build restock items from quantities
+      const items = updatedItems
+        .map(([id, val]) => {
+          const item = inventory.find(i => i.id === id);
+          if (!item) return null;
+          return {
+            ingredientId: id,
+            name: item.name,
+            amountAdded: parseFloat(val),
+            unit: item.unit,
+          };
+        })
+        .filter(Boolean) as Array<{
+          ingredientId: string;
+          name: string;
+          amountAdded: number;
+          unit: string;
+        }>;
+
+      // Step 3: Confirm restock with backend
+      try {
+        await restockIngredient({
+          receiptUploadId,
+          items,
+        });
+      } catch (restockErr) {
+        const errorMsg = (restockErr as Error).message || 'Failed to confirm restock';
+        setUploadError(errorMsg);
+        setIsUploading(false);
+        return;
+      }
+
+      // Step 4: Update parent state with the quantities
+      const updates: Record<string, number> = {};
+      for (const [id, val] of updatedItems) {
+        const n = parseFloat(val);
+        if (!isNaN(n) && n > 0) updates[id] = n;
+      }
+      onStockIn(updates);
+
+      // Step 5: Show success
+      setSuccessTime(new Date());
+      setStep('success');
+    } finally {
+      setIsUploading(false);
     }
-    onStockIn(updates);
-    setSuccessTime(new Date());
-    setStep('success');
   };
 
   const handleReset = () => {
@@ -115,6 +178,9 @@ export function StockInModal({ inventory, onStockIn, onClose }: StockInModalProp
     setPreviewUrl(null);
     setQuantities({});
     setSuccessTime(null);
+    setUploadError(null);
+    setUploadedReceiptName(null);
+    setIsUploading(false);
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -311,6 +377,15 @@ export function StockInModal({ inventory, onStockIn, onClose }: StockInModalProp
                 </p>
               </div>
 
+              {uploadError && (
+                <div className="flex items-start gap-2 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
+                  <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                  <p className="text-xs text-red-700">
+                    {uploadError}
+                  </p>
+                </div>
+              )}
+
               {categoryOrder.map(cat => {
                 const items = grouped[cat];
                 if (!items || items.length === 0) return null;
@@ -430,12 +505,12 @@ export function StockInModal({ inventory, onStockIn, onClose }: StockInModalProp
                 </div>
               </div>
 
-              {receiptFile && (
+              {receiptFile && uploadedReceiptName && (
                 <div className="flex items-center gap-2 text-xs text-[#7A6558] bg-[#F5EFE6] rounded-xl px-4 py-3 border border-[#F0DCC0] w-full">
                   <FolderOpen className="w-3.5 h-3.5 shrink-0 text-[#9A8F86]" />
                   <span>
                     Receipt saved to{' '}
-                    <span className="font-mono text-[#4A7C59]">/Receipts/</span>
+                    <span className="font-mono text-[#4A7C59]">/Receipts/{uploadedReceiptName}</span>
                   </span>
                 </div>
               )}
@@ -472,22 +547,32 @@ export function StockInModal({ inventory, onStockIn, onClose }: StockInModalProp
             <>
               <button
                 onClick={() => setStep('upload')}
-                className="flex-1 px-4 py-2.5 border border-[#F0DCC0] text-[#9A8F86] rounded-xl hover:bg-[#F5EFE6] transition-colors text-sm"
+                disabled={isUploading}
+                className="flex-1 px-4 py-2.5 border border-[#F0DCC0] text-[#9A8F86] rounded-xl hover:bg-[#F5EFE6] transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Back
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={updatedItems.length === 0}
+                disabled={updatedItems.length === 0 || isUploading}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm transition-colors ${
-                  updatedItems.length > 0
+                  updatedItems.length > 0 && !isUploading
                     ? 'bg-[#4A7C59] hover:bg-[#3d6b4d]'
                     : 'bg-[#D0C4BE] cursor-not-allowed'
                 }`}
               >
-                <Save className="w-4 h-4" />
-                Save Stock-In
-                {updatedItems.length > 0 && ` (${updatedItems.length})`}
+                {isUploading ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Stock-In
+                    {updatedItems.length > 0 && ` (${updatedItems.length})`}
+                  </>
+                )}
               </button>
             </>
           )}
