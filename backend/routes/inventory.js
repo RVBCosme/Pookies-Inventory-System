@@ -56,4 +56,8 @@ router.put('/update/:id',        ctrl.updateIngredient);
 // DELETE /api/inventory/delete/:id     — remove ingredient + its log rows (logs ADJUSTMENT to file)
 router.delete('/delete/:id',     ctrl.deleteIngredient);
 
+// NEW routes
+router.get('/transactions', ctrl.getTransactions);
+router.get('/low-stock', ctrl.getLowStock);
+
 module.exports = router;
