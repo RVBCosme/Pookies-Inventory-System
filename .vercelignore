@@ -1,0 +1,7 @@
+# Backend is not part of the Vercel (frontend-only) deployment.
+# It runs separately — see the deploy notes. Excluding it keeps the
+# upload small and prevents Vercel from misreading server code.
+backend
+*.db
+*.db-shm
+*.db-wal
